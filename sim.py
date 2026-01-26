@@ -60,20 +60,29 @@ def zoom(s, mx, my):
 ### Strokes #######
 # This should probably be split out into another file?
 
-def stroke_1x1(mix, miy):
-    return [(mix, miy)]
+stroke_size = 0
+def stroke_default(mix, miy):
+    return [(mix+ix, miy+iy) for ix in range(-stroke_size,stroke_size+1)
+                             for iy in range(-stroke_size,stroke_size+1)]
 
-def stroke_3x3(mix, miy):
-    return [(mix-1, miy-1),(mix, miy-1),(mix+1, miy-1),
-            (mix-1, miy),(mix, miy),(mix+1, miy),
-            (mix-1, miy+1),(mix, miy+1),(mix+1, miy+1)]
+def normalize_points(ps):
+    minx, miny = min(p[0] for p in ps), min(p[1] for p in ps)
+    maxx, maxy = max(p[0] for p in ps), max(p[1] for p in ps)
+    centerx, centery = (minx + maxx)//2, (miny + maxy)//2
+    return [(x - centerx, y - centery) for (x, y) in ps]
+
+clipboard = {}
+key = 'a'
+def stroke_paste(mix, miy):
+    if key not in clipboard: return stroke_default(mix, miy)
+    return [(x+mix, y+miy) for (x, y) in clipboard[key]]
 
 ###################
 
 arr = np.zeros(ARRAY_SHAPE)
 
 stroke = set()
-stroke_style = stroke_1x1
+stroke_style = stroke_default
 mousedown = False # There has to be a better way of doing this
 strokemode = 0
 
@@ -99,12 +108,26 @@ while running:
             stroke = set()
             mousedown = False
         elif event.type == pygame.KEYDOWN:
+            # non-repeatable (non-smooth) key bindings
             if event.key == pygame.K_s:
                 select = True
-            if event.key == pygame.K_ESCAPE:
+            elif event.key == pygame.K_ESCAPE:
                 select = False
                 selection = set()
-            stroke_style = stroke_1x1
+                stroke_style = stroke_default
+                stroke_size = 1
+            elif event.key == pygame.K_q:   # temporary stroke size bindings
+                stroke_size = max(stroke_size - 1, 0)
+            elif event.key == pygame.K_w:
+                stroke_size += 1
+            elif event.key == pygame.K_y and select:
+                clipboard['a'] = normalize_points([p for p in selection if arr[p]])
+                selection = set()
+                select = False
+            elif event.key == pygame.K_p:
+                stroke_style = stroke_paste
+
+    # repeatable (smooth) keybindings
     keys = pygame.key.get_pressed()
     if keys[pygame.K_UP]:
         offy += py//NAV_SCALE
@@ -114,13 +137,10 @@ while running:
         offx += px//NAV_SCALE
     elif keys[pygame.K_RIGHT]:
         offx -= px//NAV_SCALE
-    elif keys[pygame.K_o]:
+    elif keys[pygame.K_l]:   # temporary zoom bindings
         zoom(1.01, mx, my)
-    elif keys[pygame.K_p]:
+    elif keys[pygame.K_k]:
         zoom(1/1.01, mx, my)
-    elif keys[pygame.K_q]:
-        stroke_style = stroke_3x3
-
 
     if mousedown:
         stroke.update(stroke_style(*get_array_index(mx, my)))

@@ -21,17 +21,23 @@ py = 15
 offx = 0
 offy = 0
 
+def frange(start, stop, step=1): # only ascending
+    i = 0
+    while i*step + start < stop:
+        yield i*step + start
+        i += 1
+
 def draw_grid(screen):
     width, height = screen.get_size()
     adj_offx = offx % px
     adj_offy = offy % py
-    for x in range(adj_offx, width + adj_offx, px):
+    for x in frange(adj_offx, width + adj_offx, px):
         pygame.draw.line(screen, 'white', (x, 0), (x, height))
-    for y in range(adj_offy, height + adj_offy, py):
+    for y in frange(adj_offy, height + adj_offy, py):
         pygame.draw.line(screen, 'white', (0, y), (width, y))
 
 def get_array_index(mx, my):
-    return ((mx - offx) // px, (my - offy) // py)
+    return (int((mx - offx) // px), int((my - offy) // py))
 
 def fill_box(screen, ix, iy, color):
     # upper left corner array coordinates
@@ -40,8 +46,15 @@ def fill_box(screen, ix, iy, color):
     ulx, uly = (offx - px) % px, (offy - py) % px
     bx, by = corrix * px + ulx, corriy * py + uly
     wx, wy = min(bx, 0) + px, min(by, 0) + py
-    rect = pygame.Rect(bx, by, wx, wy)
+    rect = pygame.Rect(bx, by, wx + 1, wy + 1)
     screen.fill(color, rect=rect)
+
+def zoom(s, mx, my):
+    global offx, offy, px, py
+    offx += mx * (s - 1)
+    offy += my * (s - 1)
+    px /= s
+    py /= s
 
 arr = np.zeros(ARRAY_SHAPE)
 
@@ -76,7 +89,6 @@ while running:
             if event.key == pygame.K_ESCAPE:
                 select = False
                 selection = set()
-
     keys = pygame.key.get_pressed()
     if keys[pygame.K_UP]:
         offy += py//NAV_SCALE
@@ -86,6 +98,11 @@ while running:
         offx += px//NAV_SCALE
     elif keys[pygame.K_RIGHT]:
         offx -= px//NAV_SCALE
+    elif keys[pygame.K_o]:
+        zoom(1.01, mx, my)
+    elif keys[pygame.K_p]:
+        zoom(1/1.01, mx, my)
+
 
     if mousedown:
         stroke.add(get_array_index(mx, my))

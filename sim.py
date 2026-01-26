@@ -15,8 +15,8 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
 running = True
 
-px = 30
-py = 30
+px = 15
+py = 15
 
 offx = 0
 offy = 0
@@ -36,7 +36,7 @@ def get_array_index(mx, my):
 def fill_box(screen, ix, iy, color):
     # upper left corner array coordinates
     ulix, uliy = get_array_index(0, 0)
-    corrix, corriy = ix - ulix - (offx % 30 != 0), iy - uliy - (offy % 30 != 0)
+    corrix, corriy = ix - ulix - (offx % px != 0), iy - uliy - (offy % py != 0)
     ulx, uly = (offx - px) % px, (offy - py) % px
     bx, by = corrix * px + ulx, corriy * py + uly
     wx, wy = min(bx, 0) + px, min(by, 0) + py
@@ -46,8 +46,11 @@ def fill_box(screen, ix, iy, color):
 arr = np.zeros(ARRAY_SHAPE)
 
 stroke = set()
-mousedown = False # There has to be a bettery way of doing this
+mousedown = False # There has to be a better way of doing this
 strokemode = 0
+
+select = False
+selection = set()
 
 mx, my = 0, 0
 while running:
@@ -56,14 +59,23 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        if event.type == pygame.MOUSEBUTTONDOWN:
+        elif event.type == pygame.MOUSEBUTTONDOWN:
             mousedown = True
             strokemode = not arr[get_array_index(mx, my)]
-        if event.type == pygame.MOUSEBUTTONUP:
-            for coords in stroke:
-                arr[coords] = strokemode
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if select:
+                selection.update(stroke)
+            else:
+                for coords in stroke:
+                    arr[coords] = strokemode
             stroke = set()
             mousedown = False
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_s:
+                select = True
+            if event.key == pygame.K_ESCAPE:
+                select = False
+                selection = set()
 
     keys = pygame.key.get_pressed()
     if keys[pygame.K_UP]:
@@ -74,8 +86,6 @@ while running:
         offx += px//NAV_SCALE
     elif keys[pygame.K_RIGHT]:
         offx -= px//NAV_SCALE
-    elif keys[pygame.K_RETURN]:
-        print(f'{get_array_index(mx, my)=}, {offx=}, {offy=}, {mx=}, {my=}')
 
     if mousedown:
         stroke.add(get_array_index(mx, my))
@@ -85,12 +95,19 @@ while running:
 
     startix, startiy = get_array_index(0, 0)
     endix, endiy = get_array_index(WIDTH, HEIGHT)
-    for i, row in enumerate(arr[startix:endix]):   # check ordering!
-        for j, elem in enumerate(row[startiy:endiy]):
+    rolled_arr = np.roll(arr, (-startix, -startiy), (0, 1))
+    for i, row in enumerate(rolled_arr[:endix - startix]):   # check ordering!
+        for j, elem in enumerate(row[:endiy - startiy]):
             if elem:
                 fill_box(screen, i + startix, j + startiy, 'purple')
     for box in stroke:
         fill_box(screen, *box, 'green')
+
+    for box in selection:
+        fill_box(screen, *box, 'gray')
+
+    if keys[pygame.K_RETURN]:
+        print(f'{get_array_index(mx, my)=}, {offx=}, {offy=}, {mx=}, {my=}')
 
     mx, my = pygame.mouse.get_pos()
     fill_box(screen, *get_array_index(mx, my), 'yellow')

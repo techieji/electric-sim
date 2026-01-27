@@ -52,10 +52,10 @@ def fill_box(screen, ix, iy, color,
 
 def zoom(s, mx, my):
     global offx, offy, px, py
-    offx += mx * (s - 1)
-    offy += my * (s - 1)
-    px /= s
-    py /= s
+    offx = (offx-mx)*s + mx 
+    offy = (offy-my)*s + my
+    px *= s
+    py *= s
 
 ### Strokes #######
 # This should probably be split out into another file?

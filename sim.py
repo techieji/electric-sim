@@ -111,6 +111,7 @@ stroke = set()
 stroke_style = stroke_default
 mousedown = False # There has to be a better way of doing this
 strokemode = 0
+selectmode = 0
 
 select = False
 selection = set()
@@ -124,10 +125,14 @@ while running:
             running = False
         elif event.type == pygame.MOUSEBUTTONDOWN:
             mousedown = True
+            selectmode = get_array_index(mx, my) not in selection
             strokemode = not arr[get_array_index(mx, my)]
         elif event.type == pygame.MOUSEBUTTONUP:
             if select:
-                selection.update(stroke)
+                if selectmode:
+                    selection.update(stroke)
+                else:
+                    selection.difference_update(stroke)
             else:
                 for coords in stroke:
                     arr[coords] = strokemode
@@ -177,8 +182,8 @@ while running:
     startix, startiy = get_array_index(0, 0)
     endix, endiy = get_array_index(*screen.get_size())
     rolled_arr = np.roll(arr, (-startix, -startiy), (0, 1))
-    for i, row in enumerate(rolled_arr[:endix - startix]):   # check ordering!
-        for j, elem in enumerate(row[:endiy - startiy]):
+    for i, row in enumerate(rolled_arr[:endix - startix + 1]):   # check ordering!
+        for j, elem in enumerate(row[:endiy - startiy + 1]):
             if elem:
                 fill_box(screen, i + startix, j + startiy, 'purple')
     for box in stroke:
@@ -196,7 +201,7 @@ while running:
     mx, my = pygame.mouse.get_pos()
     for box in stroke_style(*get_array_index(mx, my)):
         fill_box(screen, *box, 'yellow')
-    draw_grid(screen)
+    #draw_grid(screen)
 
     # flip() the display to put your work on screen
     pygame.display.flip()

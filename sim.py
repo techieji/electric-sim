@@ -221,12 +221,6 @@ while running:
     for key in keycodes:
         if keys[key]: model.handleKey(key, view)
 
-
-    elif keys[pygame.K_l]:   # temporary zoom bindings
-        zoom(1.01, mx, my)
-    elif keys[pygame.K_k]:
-        zoom(1/1.01, mx, my)
-
     if mousedown:
         stroke.update(stroke_style(*get_array_index(mx, my)))
 

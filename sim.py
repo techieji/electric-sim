@@ -1,5 +1,10 @@
 import pygame
 import numpy as np
+from enum import Enum
+from collections import deque
+
+### Constants ###
+# Should probably be broken out
 
 WIDTH = 1280
 HEIGHT = 720
@@ -8,18 +13,10 @@ ARRAY_SHAPE = (1000,1000)
 
 # NAV_SCALE is speed of navigation, higher is slower
 NAV_SCALE = 10
+# How many past keypresses to store
+KEYPRESS_LOG_SIZE = 1000
 
-# pygame setup
-pygame.init()
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
-clock = pygame.time.Clock()
-running = True
-
-px = 15
-py = 15
-
-offx = 0
-offy = 0
+### Useful functions ###
 
 def frange(start, stop, step=1): # only ascending
     i = 0
@@ -27,35 +24,70 @@ def frange(start, stop, step=1): # only ascending
         yield i*step + start
         i += 1
 
-def draw_grid(screen):
-    width, height = screen.get_size()
-    adj_offx = offx % px
-    adj_offy = offy % py
-    for x in frange(adj_offx, width + adj_offx, px):
-        pygame.draw.line(screen, 'white', (x, 0), (x, height))
-    for y in frange(adj_offy, height + adj_offy, py):
-        pygame.draw.line(screen, 'white', (0, y), (width, y))
+# px is an actual, screen pixel
+# Pixel is the rendered box units
+type pix = int
+type Pixel = int
 
-def get_array_index(mx, my):
-    return (int((mx - offx) // px), int((my - offy) // py))
 
-def fill_box(screen, ix, iy, color,
-             draw_fn=lambda screen,rect,color: screen.fill(color, rect=rect)):
-    # upper left corner array coordinates
-    ulix, uliy = get_array_index(0, 0)
-    corrix, corriy = ix - ulix - (offx % px != 0), iy - uliy - (offy % py != 0)
-    ulx, uly = (offx - px) % px, (offy - py) % px
-    bx, by = corrix * px + ulx, corriy * py + uly
-    wx, wy = min(bx, 0) + px, min(by, 0) + py
-    rect = pygame.Rect(bx, by, wx + 1, wy + 1)
-    draw_fn(screen, rect, color)
+class View:
+    def __init__(self, px: pix, py: pix, width: pix, height: pix, offx: pix=0, offy: pix=0):
+        # size of each pixel
+        self.px = px
+        self.py = py
+        # the view frame's offset (in real pixels)
+        self.offx = offx
+        self.offy = offy
 
-def zoom(s, mx, my):
-    global offx, offy, px, py
-    offx = (offx-mx)*s + mx 
-    offy = (offy-my)*s + my
-    px *= s
-    py *= s
+        pygame.init()
+        self.screen = pygame.display.set_mode((width, height), pygame.RESIZABLE)
+        self.clock = pygame.time.Clock()
+        self.running = True
+    
+    @property
+    def width(self): return self.screen.get_width()
+    @property
+    def height(self): return self.screen.get_height()
+
+    @property
+    def adj_offx(self): return self.offx % self.px
+    def adj_offy(self): return self.offy % self.py
+
+    def get_array_index(self, mx: pix, my: pix) -> tuple[Pixel, Pixel]:
+        return ( int((mx - self.offx) // self.px)
+               , int((my - self.offy) // self.py))
+
+    def current_pixel(self) -> tuple[Pixel, Pixel]:
+        mx, my = pygame.mouse.get_pos()
+        return self.get_array_index(mx, my)
+
+    def draw_grid(self):
+        for x in frange(adj_offx, self.width + self.adj_offx, self.px):
+            pygame.draw.line(self.screen, 'white', (x, 0), (x, self.height))
+        for y in frange(adj_offy, self.height + self.adj_offy, self.py):
+            pygame.draw.line(self.screen, 'white', (0, y), (self.width, y))
+
+    def fill_box(self, ix: Pixel, iy: Pixel, color,
+                 draw_fn=lambda screen,rect,color: screen.fill(color, rect=rect)):
+        # upper left corner array coordinates
+        ulix, uliy = self.get_array_index(0, 0)
+        corrix, corriy = ix - ulix - (self.adj_offx != 0), iy - uliy - (self.adj_offy != 0)
+        ulx, uly = (self.offx - self.px) % self.px, (self.offy - self.py) % self.px
+        bx, by = corrix * self.px + ulx, corriy * self.py + uly
+        wx, wy = min(bx, 0) + self.px, min(by, 0) + self.py
+        rect = pygame.Rect(bx, by, wx + 1, wy + 1)
+        draw_fn(self.screen, rect, color)
+
+    def pan(self, dx, dy):
+        self.offx += dx * self.px//NAV_SCALE
+        self.offy += dy * self.py//NAV_SCALE
+
+    def zoom(self, s: float):
+        mx, my = pygame.mouse.get_pos()
+        self.offx = (self.offx - mx) * s + mx 
+        self.offy = (self.offy - my) * s + my
+        self.px *= s
+        self.py *= s
 
 # ======== Variables and functions for the algorithm ========
 VERTICES_NOT = []
@@ -105,69 +137,91 @@ def stroke_paste(mix, miy):
 
 ###################
 
-arr = np.zeros(ARRAY_SHAPE)
+class Mode(Enum):
+    WRITE = 1
+    SELECT = 2
 
-stroke = set()
-stroke_style = stroke_default
-mousedown = False # There has to be a better way of doing this
-strokemode = 0
-selectmode = 0
+class Model:
+    def __init__(self, arr=None):
+        self.arr = np.zeros(ARRAY_SHAPE) if arr is None else arr
+        self.escape()
 
-select = False
-selection = set()
+        self.mousedown = False
+        self.remove = False      # whether items are added or not
 
-mx, my = 0, 0
+        self.keypress_log = deque([0]*KEYPRESS_LOG_SIZE, maxsize=KEYPRESS_LOG_SIZE)
+
+    def escape(self, reset_stroke_style=True):
+        global stroke_size    # This is bad...
+        self.stroke = set()
+        self.mode = Mode.WRITE
+        if reset_stroke_style
+            self.stroke_style = stroke_default
+            stroke_size = 0
+
+    def onQuit(self, _, view):  # can def be moved to view
+        view.running = False
+
+    def onMouseButtonDown(self, _, view):
+        self.mousedown = True
+        match self.mode:
+            case Mode.WRITE:
+                self.remove = arr[view.current_pixel()]
+            case Mode.SELECT:
+                self.remove = view.current_pixel() in selection
+
+    def onMouseButtonUp(self, _, view):
+        self.mousedown = False
+        match self.mode:
+            case Mode.WRITE:
+                for coords in self.stroke:
+                    self.arr[coords] = not self.remove
+                self.stroke = set()
+            case Mode.SELECT:
+                # will be implicitly handled by not resetting the stroke
+                pass
+
+    def onKeyDown(self, ev, view):    # nonrepeatable bindings
+        global stroke_size    # This is very bad...
+        match ev.key:
+            case pygame.K_s: self.mode = Mode.SELECT
+            case pygame.K_ESCAPE: self.escape()
+            # temporary bindings
+            case pygame.K_q: stroke_size = max(stroke_size - 1, 0)
+            case pygame.K_q: stroke_size += 1
+            case pygame.K_p: self.stroke_style = stroke_paste
+            case key if self.keypress_log[-1] == pygame.K_y:
+                clipboard[key] = normalize_points([p for p in self.stroke if self.arr[p]])
+                self.escape(reset_stroke_style=False)
+
+    def handleKey(self, keycode, view):   # repeatable bindings
+        match keycode:
+            case pygame.K_UP: view.pan(0,1)
+            case pygame.K_DOWN: view.pan(0,-1)
+            case pygame.K_LEFT: view.pan(1,0)
+            case pygame.K_RIGHT: view.pan(-1,0)
+            # temporary bindings
+            case pygame.K_l: view.zoom(1.01)
+            case pygame.K_k: view.zoom(1/1.01)
+
+view = View(px = 15, py = 15, offx = 0, WIDTH, HEIGHT, offy = 0)
+model = Model()
+
+keycodes: list[int] = [getattr(pygame, x) for x in dir(pygame) if x.startswith('K_')]
+
 while running:
     # poll for events
     # pygame.QUIT event means the user clicked X to close your window
     for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            mousedown = True
-            selectmode = get_array_index(mx, my) not in selection
-            strokemode = not arr[get_array_index(mx, my)]
-        elif event.type == pygame.MOUSEBUTTONUP:
-            if select:
-                if selectmode:
-                    selection.update(stroke)
-                else:
-                    selection.difference_update(stroke)
-            else:
-                for coords in stroke:
-                    arr[coords] = strokemode
-            stroke = set()
-            mousedown = False
-        elif event.type == pygame.KEYDOWN:
-            # non-repeatable (non-smooth) key bindings
-            if event.key == pygame.K_s:
-                select = True
-            elif event.key == pygame.K_ESCAPE:
-                select = False
-                selection = set()
-                stroke_style = stroke_default
-                stroke_size = 1
-            elif event.key == pygame.K_q:   # temporary stroke size bindings
-                stroke_size = max(stroke_size - 1, 0)
-            elif event.key == pygame.K_w:
-                stroke_size += 1
-            elif event.key == pygame.K_y and select:
-                clipboard['a'] = normalize_points([p for p in selection if arr[p]])
-                selection = set()
-                select = False
-            elif event.key == pygame.K_p:
-                stroke_style = stroke_paste
+        fn = getattr(model, 'on' + pygame.event.event_name(event), None)
+        if fn is not None: fn(event, view)
 
     # repeatable (smooth) keybindings
     keys = pygame.key.get_pressed()
-    if keys[pygame.K_UP]:
-        offy += py//NAV_SCALE
-    elif keys[pygame.K_DOWN]:
-        offy -= py//NAV_SCALE
-    elif keys[pygame.K_LEFT]:
-        offx += px//NAV_SCALE
-    elif keys[pygame.K_RIGHT]:
-        offx -= px//NAV_SCALE
+    for key in keycodes:
+        if keys[key]: model.handleKey(key, view)
+
+
     elif keys[pygame.K_l]:   # temporary zoom bindings
         zoom(1.01, mx, my)
     elif keys[pygame.K_k]:

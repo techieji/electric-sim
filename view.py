@@ -2,18 +2,6 @@ from constants import *         # TODO: make more specific
 import pygame
 import numpy as np
 
-def frange(start, stop, step=1):
-    '''Range function that supports floats.
-
-    This function does not accumulate errors. When
-    `step` > 0, requires that `start` < `stop`. When
-    `step` = 0, then `stop` < `start`.
-    '''
-    i = 0
-    while i*step + start < stop:
-        yield i*step + start
-        i += 1
-
 class View:
     '''Abstraction class over the raw pygame display to be used by the Model class.
 
